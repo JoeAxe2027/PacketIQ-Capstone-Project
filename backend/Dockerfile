@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . /app
 
-# Create venv and install requirements safely (PEP 668 compliant)
+# Install requirements into a venv (PEP 668 compliant)
 RUN python3 -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
  && if [ -f "requirements.txt" ]; then /opt/venv/bin/pip install --no-cache-dir -r requirements.txt; fi

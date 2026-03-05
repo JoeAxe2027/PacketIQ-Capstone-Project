@@ -10,15 +10,3 @@ services:
       - ./logs:/data/logs
       - ./pcaps:/data/pcaps
     command: ["bash"]
-
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
