@@ -8,6 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . /app
 
-RUN pip3 install --no-cache-dir -r requirements.txt
+
 
 CMD ["/bin/bash"]
