@@ -252,7 +252,6 @@ def summarize_logs():
     else:
         summary.append("- None")
 
-    # Add a short suspicious-pattern section for Ollama
     summary.append("\nPotential indicators observed:")
     indicators_added = False
 
@@ -307,32 +306,67 @@ def ask_user_question():
     return question
 
 
-def main():
-    print("=== PacketIQ CLI ===")
+def ask_next_action():
+    print("\nWhat would you like to do next?")
+    print("1. Ask another question about this same PCAP")
+    print("2. Analyze a different PCAP")
+    print("3. Exit")
 
+    while True:
+        choice = input("\nEnter 1, 2, or 3: ").strip()
+        if choice in {"1", "2", "3"}:
+            return choice
+        print("Please enter 1, 2, or 3.")
+
+
+def analyze_single_pcap():
     pcaps = list_pcap_files()
     selected_pcap = choose_pcap_file(pcaps)
 
     if not selected_pcap:
-        return
+        return "exit"
 
     success = run_zeek_on_pcap(selected_pcap)
     if not success:
-        return
+        return "repeat_pcap"
 
     evidence = summarize_logs()
 
     print("\n=== PARSED SUMMARY ===\n")
     print(evidence)
 
-    user_question = ask_user_question()
+    while True:
+        user_question = ask_user_question()
 
-    print("\n=== OLLAMA ANALYSIS ===\n")
-    try:
-        answer = analyze_evidence(user_question, evidence)
-        print(answer)
-    except Exception as e:
-        print(f"Ollama analysis failed: {e}")
+        print("\n=== OLLAMA ANALYSIS ===\n")
+        try:
+            answer = analyze_evidence(user_question, evidence)
+            print(answer)
+        except Exception as e:
+            print(f"Ollama analysis failed: {e}")
+
+        next_action = ask_next_action()
+
+        if next_action == "1":
+            continue
+        if next_action == "2":
+            return "new_pcap"
+        return "exit"
+
+
+def main():
+    print("=== PacketIQ CLI ===")
+
+    while True:
+        result = analyze_single_pcap()
+
+        if result == "new_pcap":
+            continue
+        if result == "repeat_pcap":
+            continue
+        break
+
+    print("\nExiting PacketIQ CLI.")
 
 
 if __name__ == "__main__":
