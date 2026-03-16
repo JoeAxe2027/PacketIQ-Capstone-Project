@@ -1,15 +1,17 @@
 from pathlib import Path
 import subprocess
 import json
+import uuid
+import os
 from collections import Counter, defaultdict
 
+from backend.db.ingest_logs import ingest_job_logs
 from backend.ollama.service import analyze_evidence
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-PCAP_DIR = PROJECT_ROOT / "pcaps"
-LOG_DIR = PROJECT_ROOT / "logs"
-
+PCAP_DIR = Path(os.getenv("PCAP_DIR", "/data/pcaps"))
+LOG_DIR = Path(os.getenv("LOG_DIR", "/data/logs"))
 
 def list_pcap_files():
     if not PCAP_DIR.exists():
@@ -63,17 +65,12 @@ def run_zeek_on_pcap(pcap_path: Path):
     print(f"\nRunning Zeek on: {pcap_path.name}")
     print("This may take a moment...\n")
 
-    project_root_str = str(PROJECT_ROOT).replace("\\", "/")
-
     cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{project_root_str}:/zeek",
-        "zeek/zeek",
         "zeek",
         "-C",
-        "-r", f"/zeek/pcaps/{pcap_path.name}",
+        "-r", str(pcap_path),
         "LogAscii::use_json=T",
-        "Log::default_logdir=/zeek/logs"
+        f"Log::default_logdir={LOG_DIR}"
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -94,7 +91,6 @@ def run_zeek_on_pcap(pcap_path: Path):
         print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
 
     return True
-
 
 def load_json_log(file_path: Path):
     records = []
@@ -329,6 +325,13 @@ def analyze_single_pcap():
     success = run_zeek_on_pcap(selected_pcap)
     if not success:
         return "repeat_pcap"
+    job_id = str(uuid.uuid4())
+    try:
+        ingest_job_logs(job_id=job_id, filename=selected_pcap.name, file_size_bytes=selected_pcap.stat().st_size, log_dir=LOG_DIR, dsn=os.getenv("DATABASE_URL"))
+        print(f"\nLogs ingested into database with ID: {job_id}")
+
+    except Exception as e:
+        print(f"Error ingesting logs: {e}")
 
     evidence = summarize_logs()
 
