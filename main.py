@@ -349,7 +349,7 @@ def analyze_single_pcap():
     while True:
         user_question = ask_user_question()
 
-        print("\n=== OLLAMA ANALYSIS ===\n")
+        print("\n=== ANALYSIS ===\n")
         try:
             answer, ollama_time = timed_step(
                 "Ollama analysis",
