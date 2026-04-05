@@ -25,7 +25,7 @@ def build_rag_index(job_id: str, log_dir: Path, detection_results: Optional[dict
     if not chunks:
         return job_id
 
-    MAX_RAG_CHUNKS = 300
+    MAX_RAG_CHUNKS = 2000
     if len(chunks) > MAX_RAG_CHUNKS:
         print(f"Limiting RAG chunks from {len(chunks)} to {MAX_RAG_CHUNKS} for {job_id}")
         chunks = chunks[:MAX_RAG_CHUNKS]

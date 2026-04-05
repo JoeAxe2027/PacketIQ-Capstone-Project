@@ -393,7 +393,9 @@ def main():
     print("\n=== OLLAMA ANALYSIS ===\n")
     ollama_time = 0.0
     try:
-        rag_context = query_rag_context(vectorstore, user_question)
+        rag_context = "no RAG context available"
+        if rag_job_id:
+            rag_context = query_rag_context(rag_job_id, user_question)
         answer, ollama_time = timed_step("Ollama analysis", analyze_evidence, user_question, evidence, rag_context)
         print(answer)
     except Exception as e:
