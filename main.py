@@ -3,15 +3,18 @@ import subprocess
 import json
 from collections import Counter, defaultdict
 import time
+import os
+import uuid
 
+from backend.db.ingest_logs import ingest_job_logs
 from backend.ollama.service import analyze_evidence
 from backend.rag.pipeline import build_rag_index, query_rag_context
 from backend.detection.detection import run_detections
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-PCAP_DIR = PROJECT_ROOT / "pcaps"
-LOG_BASE_DIR = PROJECT_ROOT / "logs"
+PCAP_DIR = Path(os.getenv("PCAP_DIR", str(PROJECT_ROOT / "pcaps")))
+LOG_BASE_DIR = Path(os.getenv("LOG_DIR", str(PROJECT_ROOT / "logs")))
 
 
 def timed_step(step_name, func, *args, **kwargs):
@@ -118,6 +121,19 @@ def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
 
     return True
 
+def log_ingestion(pcap_path: Path, log_dir: Path) -> str| None:
+    job_id = str(uuid.uuid4())
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        print("DATABASE URL not set. Logs will not be ingested.")
+
+    try:
+        ingest_job_logs(job_id=job_id, filename=pcap_path.name, file_size_bytes=pcap_path.stat().st_size, log_dir=log_dir, dsn=dsn)
+        print(f"\nLogs ingested into database with ID: {job_id}")
+        return job_id
+    except Exception as e:
+        print(f"error ingesting logs into database: {e}")
+        return None
 
 def load_json_log(file_path: Path):
     records = []
@@ -345,7 +361,7 @@ def main():
     success, zeek_time = timed_step("Zeek parsing", run_zeek_on_pcap, selected_pcap, log_dir)
     if not success:
         return
-
+    job_id = log_ingestion(selected_pcap, log_dir)
     detection_time = 0.0
     detection_results = None
     conn_log_path = log_dir / "conn.log"
@@ -361,7 +377,11 @@ def main():
             print(f"Detection failed: {e}")
 
     print("\n=== BUILDING RAG INDEX ===")
-    vectorstore, rag_time = timed_step("RAG index build", build_rag_index, log_dir, detection_results)
+    rag_job_id = None
+    rag_time = 0.0
+    if job_id:
+        rag_job_id, rag_time= timed_step("RAG index build", build_rag_index, job_id, log_dir, detection_results)
+    else: print("Skipping RAG index due to ingestion failure.")
 
     evidence, summary_time = timed_step("Log summarization", summarize_logs, log_dir)
 

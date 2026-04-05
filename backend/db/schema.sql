@@ -109,3 +109,14 @@ CREATE INDEX idx_detections_job_type ON detections(job_id, detection_type);
 
 CREATE INDEX idx_rag_chunks_job_source ON rag_chunks(job_id, source);  
 CREATE INDEX idx_rag_chunks_job_created_at ON rag_chunks(job_id, created_at);
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+ALTER TABLE rag_chunks
+ADD COLUMN embedding vector(768);
+
+CREATE INDEX idx_rag_chunks_job_created_at ON rag_chunks(job_id, created_at);
+
+CREATE INDEX idx_rag_chunks_embedding_hnsw
+ON rag_chunks
+USING hnsw (embedding vector_cosine_ops);

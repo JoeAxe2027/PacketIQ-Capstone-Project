@@ -2,6 +2,11 @@ from pathlib import Path
 from typing import List
 import json
 
+#cap chunks to keep RAG size manageable
+MAX_CONN_CHUNKS = 500
+MAX_DNS_CHUNKS = 200
+MAX_WEIRD_CHUNKS = 100
+MAX_NOTICE_CHUNKS = 100
 
 def load_json_log(file_path: Path) -> List[dict]:
     """Load a Zeek JSON log file into a list of records."""
