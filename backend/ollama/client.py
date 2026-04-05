@@ -9,17 +9,16 @@ class OllamaClient:
 
     def chat(self, messages, stream=False):
         response = requests.post(
-        f"{self.base_url}/api/chat",
-        json={
-            "model": self.model,
-            "messages": messages,
-            "stream": stream,
-            "keep_alive": "10m",
-            "options": {
-            "num_ctx": OLLAMA_NUM_CTX
-        }
-    },
-    timeout=OLLAMA_TIMEOUT
-)
+            f"{self.base_url}/api/chat",
+            json={
+                "model": self.model,
+                "messages": messages,
+                "stream": stream,
+                "options": {
+                    "num_ctx": OLLAMA_NUM_CTX
+                }
+            },
+            timeout=OLLAMA_TIMEOUT
+        )
         response.raise_for_status()
         return response.json()
