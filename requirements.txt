@@ -1,2 +1,10 @@
-psycopg[binary]
 requests
+pydantic
+langchain
+langchain-core
+langchain-ollama
+langchain-community
+faiss-cpu
+fastapi
+uvicorn[standard]
+python-multipart
