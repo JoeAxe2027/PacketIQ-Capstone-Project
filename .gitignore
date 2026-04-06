@@ -7,3 +7,10 @@ logs/
 pcaps/
 .git/
 backend\ollama\__pycache__
+.venv/
+venv/
+__pycache__/
+*.pyc
+logs/
+output/
+pcaps/
