@@ -13,22 +13,34 @@ def get_conn():
     return psycopg2.connect(DATABASE_URL)
 
 
+def embed_texts(texts: list[str], batch_size: int = 200) -> list[list[float]]:
+    if not texts:
+        return []
+
+    all_embeddings = []
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+
+        resp = requests.post(
+            f"{OLLAMA_BASE_URL}/api/embed",
+            json={
+                "model": EMBED_MODEL,
+                "input": batch,
+                "truncate": True,
+            },
+            timeout=300,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        all_embeddings.extend(data["embeddings"])
+
+    return all_embeddings
+
+
 def embed_text(text: str) -> list[float]:
-    resp = requests.post(
-        f"{OLLAMA_BASE_URL}/api/embeddings",
-        json={
-            "model": EMBED_MODEL,
-            "prompt": text,
-        },
-        timeout=120,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["embedding"]
-
-
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    return [embed_text(t) for t in texts]
+    return embed_texts([text])[0]
 
 
 def connection_to_chunk(row):
@@ -82,6 +94,14 @@ def detection_to_chunk(row):
 def build_rag_index(job_id, *_args, **_kwargs):
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
+            cur.execute("SELECT COUNT(*) FROM rag_chunks WHERE job_id = %s", (job_id,))
+            existing_count = cur.fetchone()["count"]
+
+            if existing_count > 0:
+                print(f"DEBUG: RAG index already exists for job_id={job_id}, skipping rebuild")
+                return {"status": "ok", "inserted": 0, "skipped": True}
+
             chunks = []
 
             cur.execute("""
@@ -90,7 +110,7 @@ def build_rag_index(job_id, *_args, **_kwargs):
                 FROM connections
                 WHERE job_id = %s
                 ORDER BY ts
-                LIMIT 5000
+                LIMIT 1000
             """, (job_id,))
             chunks.extend(("connections", connection_to_chunk(r)) for r in cur.fetchall())
 
@@ -99,7 +119,7 @@ def build_rag_index(job_id, *_args, **_kwargs):
                 FROM dns_events
                 WHERE job_id = %s
                 ORDER BY ts
-                LIMIT 3000
+                LIMIT 500
             """, (job_id,))
             chunks.extend(("dns_events", dns_to_chunk(r)) for r in cur.fetchall())
 
@@ -108,7 +128,7 @@ def build_rag_index(job_id, *_args, **_kwargs):
                 FROM http_events
                 WHERE job_id = %s
                 ORDER BY ts
-                LIMIT 2000
+                LIMIT 250
             """, (job_id,))
             chunks.extend(("http_events", http_to_chunk(r)) for r in cur.fetchall())
 
@@ -117,7 +137,7 @@ def build_rag_index(job_id, *_args, **_kwargs):
                 FROM tls_events
                 WHERE job_id = %s
                 ORDER BY ts
-                LIMIT 2000
+                LIMIT 250
             """, (job_id,))
             chunks.extend(("tls_events", tls_to_chunk(r)) for r in cur.fetchall())
 
@@ -133,10 +153,13 @@ def build_rag_index(job_id, *_args, **_kwargs):
                 return {"status": "ok", "inserted": 0}
 
             texts = [c[1] for c in chunks]
+
+            print(f"DEBUG: embedding {len(texts)} chunks")
+
             embeddings = embed_texts(texts)
 
             rows = [
-                (str(job_id), source, text, embedding)
+                (str(job_id), source, text, vector_literal(embedding))
                 for (source, text), embedding in zip(chunks, embeddings)
             ]
 
@@ -154,12 +177,15 @@ def build_rag_index(job_id, *_args, **_kwargs):
 
         conn.commit()
 
+    print(f"DEBUG: inserted {len(rows)} RAG chunks")
+
     return {"status": "ok", "inserted": len(rows)}
+def vector_literal(vec):
+    return "[" + ",".join(str(x) for x in vec) + "]"
 
 
 def query_rag_context(job_id, question, top_k=8):
-    question_embedding = embed_text(question)
-
+    question_embedding =vector_literal(embed_text(question))
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
