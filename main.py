@@ -25,6 +25,27 @@ def timed_step(step_name, func, *args, **kwargs):
     print(f"[TIME] {step_name}: {elapsed:.2f} seconds")
     return result, elapsed
 
+def log_ingestion(pcap_path: Path, log_dir: Path) -> str | None:
+    job_id = str(uuid.uuid4())
+    dsn = os.getenv("DATABASE_URL")
+
+    if not dsn:
+        print("DATABASE_URL not set. Logs will not be ingested.")
+        return None
+
+    try:
+        ingest_job_logs(
+            job_id=job_id,
+            filename=pcap_path.name,
+            file_size_bytes=pcap_path.stat().st_size,
+            log_dir=log_dir,
+            dsn=dsn,
+        )
+        print(f"\nLogs ingested into database with ID: {job_id}")
+        return job_id
+    except Exception as e:
+        print(f"Error ingesting logs into database: {e}")
+        return None
 
 def list_pcap_files():
     if not PCAP_DIR.exists():
@@ -75,6 +96,7 @@ def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
     """
     Run Zeek on the given PCAP and write logs to log_dir.
     If log_dir already contains .log files, skip parsing and use the cached logs.
+    Assumes Zeek is installed in the current environment/container.
     """
     if logs_exist(log_dir):
         print(f"\nCached logs found for '{pcap_path.name}' — skipping Zeek parse.")
@@ -88,18 +110,12 @@ def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
     print(f"\nRunning Zeek on: {pcap_path.name}")
     print("This may take a moment...\n")
 
-    project_root_str = str(PROJECT_ROOT).replace("\\", "/")
-    log_dir_in_container = f"/zeek/logs/{pcap_path.stem}"
-
     cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{project_root_str}:/zeek",
-        "zeek/zeek",
         "zeek",
         "-C",
-        "-r", f"/zeek/pcaps/{pcap_path.name}",
+        "-r", str(pcap_path),
         "LogAscii::use_json=T",
-        f"Log::default_logdir={log_dir_in_container}"
+        f"Log::default_logdir={log_dir}",
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -120,21 +136,6 @@ def run_zeek_on_pcap(pcap_path: Path, log_dir: Path) -> bool:
         print(f"- {log_file.name} ({log_file.stat().st_size} bytes)")
 
     return True
-
-def log_ingestion(pcap_path: Path, log_dir: Path) -> str| None:
-    job_id = str(uuid.uuid4())
-    dsn = os.getenv("DATABASE_URL")
-    if not dsn:
-        print("DATABASE URL not set. Logs will not be ingested.")
-
-    try:
-        ingest_job_logs(job_id=job_id, filename=pcap_path.name, file_size_bytes=pcap_path.stat().st_size, log_dir=log_dir, dsn=dsn)
-        print(f"\nLogs ingested into database with ID: {job_id}")
-        return job_id
-    except Exception as e:
-        print(f"error ingesting logs into database: {e}")
-        return None
-
 def load_json_log(file_path: Path):
     records = []
 

@@ -15,4 +15,4 @@ RUN python3 -m venv /opt/venv \
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-CMD ["/bin/bash"]
+CMD ["uvicorn", "api:app", "--host", "]

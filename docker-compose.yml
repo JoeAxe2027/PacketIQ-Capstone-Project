@@ -3,44 +3,38 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-
-    command: ["bash", "-lc", "sleep infinity"]
+    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
     stdin_open: true
     tty: true
-
     volumes:
-      - ./pcaps:/data/pcaps
-      - ./logs:/data/logs
-      - ./scripts:/data/scripts
-      - ./output:/data/output
-
+      - ./:/app
+      - ./pcaps:/app/pcaps
+      - ./logs:/app/logs
+      - ./output:/app/output
     ports:
       - "8000:8000"
-
     depends_on:
       - db
       - ollama
-
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/packetiq
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2
       OLLAMA_TIMEOUT: "120"
       OLLAMA_NUM_CTX: "2048"
+      PCAP_DIR: /app/pcaps
+      LOG_DIR: /app/logs
 
   db:
     image: pgvector/pgvector:pg16
     container_name: packetiq_db
     restart: unless-stopped
-
     environment:
       POSTGRES_DB: packetiq
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-
     ports:
       - "55432:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
@@ -55,6 +49,17 @@ services:
       OLLAMA_HOST: 0.0.0.0:11434
     volumes:
       - ollama_data:/root/.ollama
+
+  frontend:
+    image: node:20
+    working_dir: /app
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:
