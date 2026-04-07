@@ -1,6 +1,6 @@
 import requests
 from .config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT, OLLAMA_NUM_CTX
-
+import os
 
 class OllamaClient:
     def __init__(self, base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL):
