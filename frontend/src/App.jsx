@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 const INITIAL_MESSAGE = {
   role: 'ai',
   type: 'text',
@@ -19,12 +21,6 @@ function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  useEffect(() => {
-    fetch('/api/pcaps')
-      .then(r => r.json())
-      .then(setPcapList)
-      .catch(() => {});
-  }, []);
 
   const addMessage = (msg) => setMessages(prev => [...prev, msg]);
 
@@ -37,12 +33,18 @@ function App() {
     formData.append('file', file);
 
     try {
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+    const res = await fetch(`${API_BASE}/api/analyze`, {
+      method: 'POST',
+      body: formData
+    });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Analysis failed');
 
       setEvidence(data.evidence);
-      fetch('/api/pcaps').then(r => r.json()).then(setPcapList).catch(() => {});
+      fetch(`${API_BASE}/api/pcaps`)
+        .then(r => r.json())
+        .then(setPcapList)
+        .catch(() => {});
       addMessage({ role: 'system', text: 'Zeek: Parsing complete. Querying PacketIQ AI…' });
       await getInitialSummary(data.evidence);
     } catch (err) {
@@ -58,7 +60,7 @@ function App() {
     addMessage({ role: 'system', text: `Zeek: Extracting metadata from ${path}…` });
 
     try {
-      const res = await fetch('/api/analyze', {
+      const res = await fetch(`${API_BASE}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),
@@ -77,7 +79,7 @@ function App() {
   };
 
   const getInitialSummary = async (ev) => {
-    const res = await fetch('/api/ask', {
+    const res = await fetch(`${API_BASE}/api/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -95,7 +97,7 @@ function App() {
     addMessage({ role: 'user', type: 'text', text: question });
 
     try {
-      const res = await fetch('/api/ask', {
+      const res = await fetch(`${API_BASE}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, evidence }),

@@ -36,6 +36,18 @@ _current_job_id: Optional[str] = None
 _current_log_dir: Optional[Path] = None
 _current_evidence: Optional[str] = None
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "https://packetiq.vercel.app"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class AskRequest(BaseModel):
     question: str
