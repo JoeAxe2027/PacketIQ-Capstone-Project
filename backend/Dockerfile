@@ -15,4 +15,4 @@ RUN python3 -m venv /opt/venv \
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-CMD ["uvicorn", "api:app", "--host", "]
+CMD uvicorn api:app --host 0.0.0.0 --port ${PORT}
