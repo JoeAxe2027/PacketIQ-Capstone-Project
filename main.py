@@ -93,22 +93,16 @@ def logs_exist(log_dir: Path) -> bool:
 
 
 def run_zeek_on_pcap(pcap_path, log_dir):
-    import subprocess
     from pathlib import Path
+    import subprocess
 
-    project_root = Path(__file__).resolve().parent
-
-    pcap_name = pcap_path.name
     log_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{project_root}:/zeek",
-        "zeek/zeek:latest",
         "zeek",
         "-C",
-        "-r", f"/zeek/pcaps/{pcap_name}",
-        f"Log::default_logdir=/zeek/{log_dir.relative_to(project_root).as_posix()}"
+        "-r", str(pcap_path),
+        f"Log::default_logdir={str(log_dir)}"
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
