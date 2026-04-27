@@ -4,19 +4,18 @@ import os
 import shutil
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
 from main import (
-    get_log_dir,
     run_zeek_on_pcap,
     summarize_logs,
-    list_pcap_files,
     PROJECT_ROOT,
-    PCAP_DIR,
+    LOG_BASE_DIR,
 )
+
 from backend.db.ingest_logs import ingest_job_logs
 from backend.ollama.service import analyze_evidence
 from backend.rag.pipeline import build_rag_index, query_rag_context
@@ -27,47 +26,57 @@ app = FastAPI(title="PacketIQ API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-_current_job_id: Optional[str] = None
-_current_log_dir: Optional[Path] = None
-_current_evidence: Optional[str] = None
-
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://packetiq.vercel.app"
+        "http://localhost:5174",
+        "https://packetiq.vercel.app",
+        "*",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(PROJECT_ROOT / "uploads")))
+LOG_DIR = Path(os.getenv("LOG_DIR", str(LOG_BASE_DIR)))
+
+_current_job_id: Optional[str] = None
+_current_evidence: Optional[str] = None
+
+
 class AskRequest(BaseModel):
     question: str
     evidence: str
 
 
-def ingest_pcap_logs_to_db(pcap_path: Path, log_dir: Path) -> str | None:
-    job_id = str(uuid.uuid4())
+@app.get("/")
+def root():
+    return {"status": "PacketIQ API running"}
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/pcaps")
+def list_pcaps():
+    # App now requires users to upload PCAPs every time.
+    return []
+
+
+def safe_filename(filename: str) -> str:
+    return Path(filename).name.replace(" ", "_")
+
+
+def ingest_pcap_logs_to_db(pcap_path: Path, log_dir: Path) -> Optional[str]:
     dsn = os.getenv("DATABASE_URL")
 
-    print(f"DEBUG: ingest_pcap_logs_to_db called")
-    print(f"DEBUG: pcap_path={pcap_path}")
-    print(f"DEBUG: log_dir={log_dir}")
-    print(f"DEBUG: DATABASE_URL set={bool(dsn)}")
-    if dsn:
-        print(f"DEBUG: DATABASE_URL={dsn}")
-
     if not dsn:
-        print("DEBUG: DATABASE_URL is missing")
+        print("DEBUG: DATABASE_URL not set. Skipping DB ingestion.")
         return None
+
+    job_id = str(uuid.uuid4())
 
     try:
         ingest_job_logs(
@@ -80,106 +89,82 @@ def ingest_pcap_logs_to_db(pcap_path: Path, log_dir: Path) -> str | None:
         print(f"DEBUG: DB ingestion succeeded, job_id={job_id}")
         return job_id
     except Exception as e:
-        print(f"DEBUG: DB ingestion exception: {e}")
+        print(f"DEBUG: DB ingestion failed: {e}")
         return None
 
 
-@app.get("/api/pcaps")
-def list_pcaps():
-    return [p.name for p in list_pcap_files()]
-
-
 @app.post("/api/analyze")
-async def analyze(request: Request):
-    global _current_job_id, _current_log_dir, _current_evidence
+async def analyze(file: UploadFile = File(...)):
+    global _current_job_id, _current_evidence
+
+    print("DEBUG: /api/analyze called")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    filename = safe_filename(file.filename)
+
+    if not filename.lower().endswith((".pcap", ".pcapng", ".cap")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .pcap, .pcapng, or .cap files are allowed",
+        )
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    pcap_path = UPLOAD_DIR / filename
+    log_dir = LOG_DIR / Path(filename).stem
 
     try:
-        print("DEBUG: /api/analyze called")
-        content_type = request.headers.get("content-type", "")
-        print(f"DEBUG: content-type={content_type}")
+        with pcap_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-        # Resolve PCAP path
-        if "multipart/form-data" in content_type:
-            form = await request.form()
-            upload = form.get("file")
-            if upload is None:
-                raise HTTPException(status_code=400, detail="No file field in form data")
-
-            print(f"DEBUG: uploaded filename={upload.filename}")
-
-            PCAP_DIR.mkdir(parents=True, exist_ok=True)
-            pcap_path = PCAP_DIR / upload.filename
-            with open(pcap_path, "wb") as f:
-                shutil.copyfileobj(upload.file, f)
-
-        elif "application/json" in content_type:
-            body = await request.json()
-            print(f"DEBUG: json body={body}")
-
-            pcap_name = body.get("path")
-            if not pcap_name:
-                raise HTTPException(status_code=400, detail="No 'path' field in JSON body")
-
-            pcap_path = PCAP_DIR / pcap_name
-            if not pcap_path.exists():
-                raise HTTPException(status_code=404, detail=f"PCAP not found: {pcap_name}")
-
-        else:
-            raise HTTPException(status_code=415, detail="Unsupported content type")
-
-        print(f"DEBUG: resolved pcap_path={pcap_path}")
-        print(f"DEBUG: pcap exists={pcap_path.exists()}")
-
-        # Zeek
-        log_dir = get_log_dir(pcap_path)
+        print(f"DEBUG: saved uploaded PCAP to {pcap_path}")
         print(f"DEBUG: log_dir={log_dir}")
-        print("DEBUG: starting Zeek")
 
         success = run_zeek_on_pcap(pcap_path, log_dir)
-        print(f"DEBUG: Zeek success={success}")
 
         if not success:
             raise HTTPException(status_code=500, detail="Zeek parsing failed")
 
-        # Detection
         detection_results = None
         conn_log_path = log_dir / "conn.log"
-        print(f"DEBUG: conn_log_path={conn_log_path}")
-        print(f"DEBUG: conn_log exists={conn_log_path.exists()}")
 
         if conn_log_path.exists():
             try:
-                print("DEBUG: starting detections")
                 output_path = PROJECT_ROOT / "output" / "detection.json"
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                detection_results = run_detections(str(conn_log_path), str(output_path))
+
+                detection_results = run_detections(
+                    str(conn_log_path),
+                    str(output_path),
+                )
                 print("DEBUG: detections completed")
             except Exception as e:
-                print(f"DEBUG: detection exception: {e}")
+                print(f"DEBUG: detection failed: {e}")
 
-        # DB ingestion
-        print("DEBUG: starting DB ingestion")
         job_id = ingest_pcap_logs_to_db(pcap_path, log_dir)
-        print(f"DEBUG: DB ingestion returned job_id={job_id}")
 
-        if job_id is None:
-            raise HTTPException(status_code=500, detail="Database ingestion failed")
+        if job_id:
+            try:
+                build_rag_index(job_id, log_dir, detection_results)
+                _current_job_id = job_id
+                print("DEBUG: RAG build completed")
+            except Exception as e:
+                print(f"DEBUG: RAG build failed: {e}")
+                _current_job_id = None
+        else:
+            _current_job_id = None
 
-        _current_job_id = job_id
-        _current_log_dir = log_dir
-
-        # RAG
-        print("DEBUG: starting RAG build")
-        build_rag_index(job_id, log_dir, detection_results)
-        print("DEBUG: RAG build completed")
-
-        # Summary
-        print("DEBUG: starting summarization")
         evidence = summarize_logs(log_dir)
         _current_evidence = evidence
-        print("DEBUG: summarization completed")
 
-        return {"evidence": evidence, "pcap": pcap_path.name}
+        return {
+            "pcap": filename,
+            "evidence": evidence,
+            "job_id": job_id,
+        }
 
     except HTTPException:
         raise
@@ -192,28 +177,32 @@ async def analyze(request: Request):
 async def ask(req: AskRequest):
     try:
         print("DEBUG: /api/ask called")
-        print(f"DEBUG: current_job_id={_current_job_id}")
-        print(f"DEBUG: question={req.question}")
 
-        if _current_job_id is None:
-            raise HTTPException(status_code=400, detail="No analysis has been run yet")
+        rag_context = "No RAG context available."
 
-        print("DEBUG: querying RAG context")
-        rag_context = query_rag_context(_current_job_id, req.question)
-        print("DEBUG: RAG context retrieved")
+        if _current_job_id:
+            try:
+                rag_context = query_rag_context(_current_job_id, req.question)
+            except Exception as e:
+                print(f"DEBUG: RAG query failed: {e}")
 
-        print("DEBUG: starting Ollama analysis")
-        answer = analyze_evidence(req.question, req.evidence, rag_context)
-        print("DEBUG: Ollama analysis completed")
+        try:
+            answer = analyze_evidence(req.question, req.evidence, rag_context)
+        except Exception as e:
+            print(f"DEBUG: Ollama failed: {e}")
+            answer = (
+                "AI analysis is currently unavailable, but Zeek successfully parsed the PCAP. "
+                "Review the evidence summary above for connection counts, top IPs, ports, services, "
+                "DNS activity, weird events, and detection results."
+            )
 
         return {"answer": answer}
 
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"DEBUG: /api/ask exception: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    port = int(os.getenv("PORT", "5000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
